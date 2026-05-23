@@ -34,6 +34,22 @@ async def test_initialize_returns_tools_capability() -> None:
 
 
 @pytest.mark.asyncio
+async def test_initialize_rejects_non_object_params() -> None:
+    handler = McpProtocolHandler(DummyToolService())  # type: ignore[arg-type]
+    response = await handler.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": ["2025-06-18"],
+        }
+    )
+
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == "initialize params must be an object"
+
+
+@pytest.mark.asyncio
 async def test_tools_list_returns_registered_tools() -> None:
     handler = McpProtocolHandler(DummyToolService())  # type: ignore[arg-type]
     response = await handler.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import json
 import re
 import secrets
@@ -10,7 +11,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from neis_mcp.api_catalog import API_DEFINITIONS
 from neis_mcp.client import NeisApiClient
-from neis_mcp.protocol import McpProtocolHandler
+from neis_mcp.protocol import McpProtocolHandler, SUPPORTED_PROTOCOL_VERSIONS
 from neis_mcp.settings import Settings, get_settings
 from neis_mcp.tool_service import ToolService
 
@@ -19,10 +20,19 @@ client = NeisApiClient(settings)
 tool_service = ToolService(client)
 protocol_handler = McpProtocolHandler(tool_service)
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        await client.close()
+
 app = FastAPI(
     title="NEIS MCP Server",
     description="NEIS Open API 12종을 제공하는 MCP Streamable HTTP 서버",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -58,6 +68,9 @@ async def mcp_post(request: Request) -> Response:
     auth_error = _validate_auth(request)
     if auth_error is not None:
         return auth_error
+    protocol_error = _validate_protocol_version(request)
+    if protocol_error is not None:
+        return protocol_error
 
     try:
         message = await request.json()
@@ -91,6 +104,9 @@ async def mcp_get(request: Request) -> Response:
     auth_error = _validate_auth(request)
     if auth_error is not None:
         return auth_error
+    protocol_error = _validate_protocol_version(request)
+    if protocol_error is not None:
+        return protocol_error
     if not _accepts_sse(request):
         return Response(status_code=405)
     return StreamingResponse(
@@ -106,7 +122,7 @@ async def mcp_delete() -> Response:
 
 
 def _accepts_sse(request: Request) -> bool:
-    return "text/event-stream" in request.headers.get("accept", "")
+    return "text/event-stream" in request.headers.get("accept", "").lower()
 
 
 async def _single_sse_event(payload: Dict[str, Any]) -> AsyncIterator[str]:
@@ -139,6 +155,15 @@ def _validate_auth(request: Request) -> Optional[Response]:
         return JSONResponse({"detail": "Invalid bearer token"}, status_code=403)
 
     return None
+
+
+def _validate_protocol_version(request: Request) -> Optional[Response]:
+    protocol_version = request.headers.get("mcp-protocol-version")
+    if not protocol_version:
+        return None
+    if protocol_version in SUPPORTED_PROTOCOL_VERSIONS:
+        return None
+    return JSONResponse({"detail": "Unsupported MCP protocol version"}, status_code=400)
 
 
 def _is_allowed_origin(origin: str, settings_: Settings) -> bool:

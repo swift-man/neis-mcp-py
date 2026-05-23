@@ -18,6 +18,7 @@ class NeisApiClient:
     def __init__(self, settings: Settings, transport: Optional[httpx.AsyncBaseTransport] = None) -> None:
         self._settings = settings
         self._transport = transport
+        self._client: Optional[httpx.AsyncClient] = None
 
     def build_params(self, api: NeisApiDefinition, arguments: Mapping[str, Any]) -> Dict[str, Any]:
         args = dict(arguments)
@@ -41,7 +42,11 @@ class NeisApiClient:
         if not isinstance(extra_params, Mapping):
             raise NeisApiError("extra_params must be an object")
 
+        reserved_params = {"Type", "pIndex", "pSize", "KEY"}
+        reserved_params.update(parameter.id for parameter in api.parameters)
         for key, value in extra_params.items():
+            if str(key) in reserved_params:
+                raise NeisApiError(f"extra_params cannot override parameter: {key}")
             if value not in (None, ""):
                 params[str(key)] = value
 
@@ -51,23 +56,36 @@ class NeisApiClient:
         params = self.build_params(api, arguments)
         url = self._api_url(api)
 
-        async with httpx.AsyncClient(
-            timeout=self._settings.request_timeout_seconds,
-            transport=self._transport,
-            follow_redirects=True,
-        ) as client:
-            try:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise NeisApiError(f"NEIS API request failed: {exc}") from exc
+        client = self._get_client()
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise NeisApiError(f"NEIS API request failed: {exc}") from exc
 
         try:
             raw = response.json()
         except json.JSONDecodeError as exc:
             raise NeisApiError("NEIS API returned a non-JSON response") from exc
 
+        if not isinstance(raw, dict):
+            raise NeisApiError("NEIS API returned an unexpected JSON response")
+
         return self._normalize_response(api, raw, str(response.url), params)
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._settings.request_timeout_seconds,
+                transport=self._transport,
+                follow_redirects=True,
+            )
+        return self._client
 
     def _api_url(self, api: NeisApiDefinition) -> str:
         return f"{self._settings.neis_base_url.rstrip('/')}/{api.api_res}"

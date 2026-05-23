@@ -29,13 +29,16 @@ class McpProtocolHandler:
             return self._handle_notification(method)
 
         if method == "initialize":
-            return self._response(request_id, self._initialize_result(message.get("params") or {}))
+            params = self._request_params(message)
+            if not isinstance(params, Mapping):
+                return self._error_response(request_id, -32602, "initialize params must be an object")
+            return self._response(request_id, self._initialize_result(params))
         if method == "ping":
             return self._response(request_id, {})
         if method == "tools/list":
             return self._response(request_id, {"tools": self._tool_service.list_tools()})
         if method == "tools/call":
-            return await self._handle_tool_call(request_id, message.get("params") or {})
+            return await self._handle_tool_call(request_id, self._request_params(message))
 
         return self._error_response(request_id, -32601, f"Method not found: {method}")
 
@@ -50,6 +53,10 @@ class McpProtocolHandler:
         if method in {"notifications/initialized", "notifications/cancelled"}:
             return None
         return None
+
+    def _request_params(self, message: Mapping[str, Any]) -> Any:
+        params = message.get("params", {})
+        return {} if params is None else params
 
     async def _handle_tool_call(self, request_id: Any, params: Mapping[str, Any]) -> Dict[str, Any]:
         if not isinstance(params, Mapping):
