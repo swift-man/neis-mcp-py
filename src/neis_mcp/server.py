@@ -75,7 +75,7 @@ async def mcp_post(request: Request) -> Response:
 
     try:
         message = await request.json()
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         response = {
             "jsonrpc": "2.0",
             "id": None,
@@ -176,12 +176,22 @@ def _is_allowed_origin(origin: str, settings_: Settings) -> bool:
     if settings_.allowed_origin_regex and re.fullmatch(settings_.allowed_origin_regex, origin):
         return True
 
-    parsed_origin = urlsplit(origin)
+    try:
+        parsed_origin = urlsplit(origin)
+        parsed_origin_port = parsed_origin.port
+    except ValueError:
+        return False
+
     for allowed_origin in settings_.allowed_origins:
-        parsed_allowed = urlsplit(allowed_origin)
+        try:
+            parsed_allowed = urlsplit(allowed_origin)
+            parsed_allowed_port = parsed_allowed.port
+        except ValueError:
+            continue
+
         same_scheme = parsed_origin.scheme == parsed_allowed.scheme
         same_host = parsed_origin.hostname == parsed_allowed.hostname
-        same_port = parsed_allowed.port is None or parsed_origin.port == parsed_allowed.port
+        same_port = parsed_allowed_port is None or parsed_origin_port == parsed_allowed_port
         if same_scheme and same_host and same_port:
             return True
     return False
