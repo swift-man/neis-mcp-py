@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 import json
 import re
@@ -132,6 +133,9 @@ async def _single_sse_event(payload: Dict[str, Any]) -> AsyncIterator[str]:
 
 async def _empty_sse_stream() -> AsyncIterator[str]:
     yield ": connected\n\n"
+    while True:
+        await asyncio.sleep(15)
+        yield ": keepalive\n\n"
 
 
 def _validate_origin(request: Request) -> Optional[Response]:

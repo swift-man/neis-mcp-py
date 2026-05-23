@@ -1,6 +1,9 @@
+import asyncio
+
+import pytest
 from starlette.requests import Request
 
-from neis_mcp.server import _accepts_sse, _is_allowed_origin, _validate_protocol_version
+from neis_mcp.server import _accepts_sse, _empty_sse_stream, _is_allowed_origin, _validate_protocol_version
 from neis_mcp.settings import Settings
 
 
@@ -47,3 +50,14 @@ def test_validate_protocol_version_rejects_unsupported_header() -> None:
 
 def test_validate_protocol_version_allows_missing_header() -> None:
     assert _validate_protocol_version(make_request({})) is None
+
+
+@pytest.mark.asyncio
+async def test_empty_sse_stream_stays_open_after_initial_comment() -> None:
+    stream = _empty_sse_stream()
+
+    assert await stream.__anext__() == ": connected\n\n"
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(stream.__anext__(), timeout=0.01)
+
+    await stream.aclose()
